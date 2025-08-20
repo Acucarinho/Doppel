@@ -128,7 +128,7 @@ func main() {
 	// Initialize DigitalOcean if configured
 	if cfg.HasDigitalOcean() {
 		fmt.Println(Cyan + "[*] Initializing DigitalOcean API..." + Reset)
-		doClient := digitalocean.NewDigitalOceanClient(cfg) // Corrigido: removido o segundo valor de retorno
+		doClient := digitalocean.NewDigitalOceanClient(cfg)
 		providers = append(providers, doClient)
 		providerCount++
 		time.Sleep(1 * time.Second)
@@ -150,8 +150,8 @@ func main() {
 	// Initialize Threat Intelligence
 	// ------------------------
 	fmt.Println(Cyan + "[*] Initializing VirusTotal API..." + Reset)
-	// Corrigido: Criando uma instância básica do cliente VirusTotal
-	vtClient := &BasicVirusTotalClient{APIKey: cfg.VirusTotal.APIKey}
+	// Corrigido: usando o caminho correto para a API key do VirusTotal
+	vtClient := &BasicVirusTotalClient{APIKey: cfg.APIKeys.VirusTotal}
 	time.Sleep(1 * time.Second)
 	
 	// Check if VirusTotal is properly configured
