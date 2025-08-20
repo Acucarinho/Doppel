@@ -1,7 +1,7 @@
 # Doppel
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/Acucarinho/Doppel/main/logo/Doppel.png" alt="Doppel Logo" width="300"/>
+  <img src="https://raw.githubusercontent.com/Acucarinho/Doppel/refs/heads/main/logo/Doppel.png" alt="Doppel Logo" width="300"/>
 </p>
 
 [![GitHub release](https://img.shields.io/badge/release-v0.3.0-blue)]()
@@ -33,9 +33,37 @@
 
 ## Quickstart
 
+### Prerequisites
+- Go **1.24.4** (Linux/amd64)  
+
+### Clone the repository
+```bash
+git clone https://github.com/Acucarinho/Doppel
+cd Doppel
+```
+
+### Install dependencies
+
+```bash
+go mod tidy
+```
+
 ### Build (Go)
 
 ```bash
 # from repository root
-go build -o bin/doppel ./cmd/rdns-telemetry
+go build -o doppel main.go
+```
+
+### Usage
+
+#### Run with configuration file
+```bash
+./doppel --config config.yaml
+```
+
+Run in debug mode
+
+```bash
+go run main.go --config config.yaml --debug
 ```
