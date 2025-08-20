@@ -1,7 +1,7 @@
 # Doppel
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/Acucarinho/Doppel/refs/heads/main/logo/Doppel.png" alt="Doppel Logo" width="300"/>
+  <img src="logo/Doppel.png" alt="Doppel Logo" width="250"/>
 </p>
 
 [![GitHub release](https://img.shields.io/badge/release-v0.3.0-blue)]()
