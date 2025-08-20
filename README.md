@@ -1,4 +1,8 @@
-# Doppel <img src="https://raw.githubusercontent.com/Acucarinho/Doppel/main/logo/Doppel.png" width="40"/>
+# Doppel
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Acucarinho/Doppel/main/logo/Doppel.png" alt="Doppel Logo" width="300"/>
+</p>
 
 [![GitHub release](https://img.shields.io/badge/release-v0.3.0-blue)]()
 [![License](https://img.shields.io/badge/license-MIT-green)]()
