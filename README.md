@@ -11,7 +11,7 @@
 
 ---
 
-# Features
+## Features
 
 - ✅ **Real-time DNS monitoring**  
 - ✅ **Advanced threat detection with VirusTotal integration**  
@@ -19,14 +19,13 @@
 - ✅ **IP address extraction and validation**  
 - ✅ **Comprehensive tracking of detected IPs**  
 - ✅ **Batch IP reputation checking**  
-- ✅ **Fast-Flux for IP rotation**  
-- ✅ **Support for Cloudflare, AWS Route53 and DigitalOcean**
+- ✅ **Support for AWS Route53**
 
 ---
 
-# Doppel Setup Guide
+## Doppel Setup Guide
 
-## 1. Create directories on your VPS (with ROOT)
+### 1. Create directories on your VPS (with ROOT)
 
 ```bash
 mkdir -p ~/bind9/config
@@ -34,27 +33,27 @@ mkdir -p ~/bind9/zones
 mkdir -p ~/bind9/logs
 ```
 
-## 2. Clone the repository
+### 2. Clone the repository
 
 ```bash
 git clone https://github.com/Acucarinho/Doppel
 cd Doppel
 ```
 
-## 3. Install dependencies
+### 3. Install dependencies
 
 ```bash
 go mod tidy
 ```
 
-## 4. Build
+### 4. Build
 
 
 ```bash
 go build -o doppel main.go
 ```
 
-## 5. Configure Bind9
+### 5. Configure Bind9
 
 Create the file `~/bind9/config/named.conf.options` with your preferred editor:
 
@@ -110,19 +109,19 @@ Create the file `~/bind9/config/named.conf` and add:
 include "/etc/bind/named.conf.options";
 include "/etc/bind/named.conf.local";
 ```
-## 6. Move the Docker Compose file
+### 6. Move the Docker Compose file
 
 ```bash
 mv ~/Doppel/docker-compose.yml ~/bind9/
 ```
 
-## 7. Install Docker and start the service
+### 7. Install Docker and start the service
 
 ```bash
 systemctl start docker
 ```
 
-## 8. Run with Docker Compose
+### 8. Run with Docker Compose
 
 ```bash
 cd ~/bind9
@@ -135,7 +134,7 @@ Check if it’s running:
 docker ps
 ```
 
-## 9. Domain Configuration
+### 9. Domain Configuration
 
 - Log in to your domain registrar panel (GoDaddy, Namecheap, etc.)
 - Find the DNS / Nameservers section.
@@ -145,7 +144,7 @@ docker ps
   ns2.darkinfrac2.com
   ```
 
-# Usage
+## Usage
 
 If you configured the VirusTotal API or Route53:
 
@@ -168,3 +167,15 @@ For debug mode:
 ## Notes
 
 - **Note:** For Route53 logs, you need to enable Resolver Query Logs and configure an S3 bucket or CloudWatch Logs.
+
+## Why Cloudflare Sucks
+
+Cloudflare is often praised for its security, DDoS protection, and performance features. But the reality is, many of the services they charge for are things that can be done for free with a little effort and the right tools.  
+
+Cloudflare has a feature called Logpush, but guess what: they only offer it on their Enterprise plan. This means you have to pay a premium fee just to access the logs. But you can easily set up Bind9 on your own VPS to log DNS queries, completely free.
+
+## To-Do List
+
+- [ ] Fast-Flux for IP and domain rotation
+- [ ] Providing false information to the IDS
+- [ ] Fake DoH/HTTP server for IDSs that use DoH
