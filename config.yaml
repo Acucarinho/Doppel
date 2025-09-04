@@ -4,17 +4,13 @@
 # ================================
 
 api_keys:
-  cloudflare: "your-cloudflare-api-key"
-  virustotal: "your-virustotal-api-key"
+  virustotal: "cebf11b47954aeb2eb4bf03064a14064ebb7678da58815b2d2bef19b38d3d483"
   aws_access_key: "your-aws-access-key"
   aws_secret_key: "your-aws-secret-key"
-  digitalocean: "your-do-api-key"
 
 endpoints:
-  cloudflare: "https://api.cloudflare.com/client/v4/"
   virustotal: "https://www.virustotal.com/api/v3/"
   aws_endpoint: "https://route53.amazonaws.com/"
-  digitalocean_endpoint: "https://api.digitalocean.com/v2/"
 
 monitoring:
   interval_seconds: 60
@@ -22,25 +18,26 @@ monitoring:
   timeout_seconds: 30
   alert_threshold: 5
 
-cloudflare:
-  api_key: "your-cloudflare-api-key"
-  zones:
-    - "zone-id-1"
-    - "zone-id-2"
-
 aws:
-  region: "us-east-1"
-  route53_zones:
-    - "Z1234567890ABC"
-    - "Z0987654321XYZ"
-
-digitalocean:
-  domains:
-    - "example.com"
-    - "yourdomain.com"
+  region: us-east-1
+  route53_zones: []
 
 logging:
-  level: "info"
-  output: "console"
-       
+  level: info
+  output: stdout
 
+docker:
+  enabled: true
+  container: "bind9"
+  read_stdlogs: true       
+  tail_files: false        
+  files:
+    - "/var/log/bind/bind.log"
+    - "/var/log/named.log"
+
+notifications:
+  email:
+    from_email: "alerts.doppel@gmail.com"  
+    from_name:  "Doppel Alerts"             
+    to:         "luseple738@gmail.com"     
+    subject_prefix: "[Doppel]"
