@@ -81,7 +81,7 @@ jobs:
           # Escreve assunto/texto/HTML em arquivos (evita problemas de quoting nos outputs)
           printf "%s" "$SUBJECT" > subject.txt
 
-          cat > text.txt <<TXT
+          cat > text.txt <<'TXT'
 Time: $NOW
 Repository: ${REPO}
 Run: ${RUN_ID}
