@@ -8,6 +8,7 @@ on:
         required: true
         default: "Possible reconnaissance detected"
       details:
+        description: "Optional technical details"
         required: false
   repository_dispatch:
     types: [doppel_alert]
@@ -256,5 +257,6 @@ PY
 
           echo "Brevo's response:"
           cat resp.json || true
+
 
 
