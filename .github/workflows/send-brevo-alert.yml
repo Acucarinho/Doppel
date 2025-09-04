@@ -78,70 +78,54 @@ jobs:
             SUBJECT="${{ steps.cfg.outputs.subject_prefix }} $SUMMARY"
           fi
 
-          # Escreve assunto/texto/HTML em arquivos (evita problemas de quoting nos outputs)
           printf "%s" "$SUBJECT" > subject.txt
 
-          cat > text.txt <<'TXT'
-Time: $NOW
-Repository: ${REPO}
-Run: ${RUN_ID}
-Summary: ${SUMMARY:-Possible reconnaissance detected}
-Details: ${DETAILS:-N/A}
-TXT
+          cat > text.txt <<TXT
+          Time: $NOW
+          Repository: ${REPO}
+          Run: ${RUN_ID}
+          Summary: ${SUMMARY:-Possible reconnaissance detected}
+          Details: ${DETAILS:-N/A}
+          TXT
 
-          cat > html.html <<'HTML'
-<!doctype html>
-<html lang="en"><head>
-<meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Doppel Alert</title>
-<style>
-  :root{--bg:#0f172a;--panel:#111827;--ink:#e5e7eb;--muted:#9ca3af;--danger:#ef4444;--chip:#1f2937}
-  body{margin:0;padding:0;background:var(--bg);color:var(--ink);font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,Helvetica Neue,Arial}
-  .container{max-width:720px;margin:0 auto;padding:24px 16px}
-  .card{background:linear-gradient(180deg,#0b1220 0%,#0a0f1a 100%);border:1px solid #1f2a44;border-radius:14px;padding:24px;box-shadow:0 10px 30px rgba(0,0,0,.45)}
-  .badge{display:inline-block;padding:6px 10px;border-radius:999px;background:#2a1b1b;color:#fecaca;border:1px solid #7f1d1d;font-size:12px;letter-spacing:.2px}
-  h1{margin:14px 0 6px;font-size:22px;line-height:1.3}
-  p{margin:8px 0;color:var(--muted)}
-  .grid{margin-top:18px;display:grid;grid-template-columns:1fr 1fr;gap:10px}
-  .k{background:var(--chip);border:1px solid #25314d;border-radius:10px;padding:10px 12px}
-  .k small{display:block;color:var(--muted);font-size:12px}
-  .k strong{color:var(--ink);font-size:14px}
-  pre{margin-top:16px;padding:14px;background:#0b1220;border:1px solid #1f2a44;color:#d1d5db;border-radius:10px;white-space:pre-wrap;word-break:break-word;font-size:13px;line-height:1.45}
-  .cta{margin-top:18px}.btn{display:inline-block;text-decoration:none;font-weight:600;padding:10px 14px;border-radius:10px;border:1px solid #334155;background:#0f1a33;color:#c7d2fe}
-  .footer{margin-top:18px;color:var(--muted);font-size:12px;text-align:center}
-  @media (max-width:600px){.grid{grid-template-columns:1fr}}
-</style>
-</head>
-<body>
-  <div class="container">
-    <div class="card">
-      <span class="badge">Possible Reconnaissance</span>
-      <h1>Suspicious DNS activity observed</h1>
-      <p>Our Doppel sensor detected one or more DNS queries that may indicate reconnaissance activity. Please review the context below and take appropriate action (block/contain/investigate).</p>
-      <div class="grid">
-        <div class="k"><small>Timestamp (UTC)</small><strong>{{NOW}}</strong></div>
-        <div class="k"><small>Repository</small><strong>{{REPO}}</strong></div>
-        <div class="k"><small>Workflow Run</small><strong>#{{RUN_ID}}</strong></div>
-        <div class="k"><small>Severity</small><strong style="color: var(--danger)">High (Recon)</strong></div>
-      </div>
-      <div class="k" style="margin-top:14px">
-        <small>Summary</small><strong>{{SUMMARY}}</strong>
-      </div>
-      <pre><strong>Details</strong>\n{{DETAILS}}</pre>
-      <div class="cta"><a class="btn" href="https://github.com/{{REPO}}/actions/runs/{{RUN_ID}}" target="_blank" rel="noopener">Open workflow run</a></div>
-      <p class="footer">You are receiving this message because alerts are enabled in Doppel for this repository.</p>
-    </div>
-  </div>
-</body></html>
-HTML
+          cat > html.html <<HTML
+          <!doctype html>
+          <html lang="en"><head>
+          <meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+          <title>Doppel Alert</title>
+          <style>...</style>
+          </head>
+          <body>
+            <div class="container">
+              <div class="card">
+                <span class="badge">Possible Reconnaissance</span>
+                <h1>Suspicious DNS activity observed</h1>
+                ...
+                <div class="grid">
+                  <div class="k"><small>Timestamp (UTC)</small><strong>{{NOW}}</strong></div>
+                  <div class="k"><small>Repository</small><strong>{{REPO}}</strong></div>
+                  <div class="k"><small>Workflow Run</small><strong>#{{RUN_ID}}</strong></div>
+                  <div class="k"><small>Severity</small><strong style="color: var(--danger)">High (Recon)</strong></div>
+                </div>
+                <div class="k" style="margin-top:14px">
+                  <small>Summary</small><strong>{{SUMMARY}}</strong>
+                </div>
+                <pre><strong>Details</strong>\n{{DETAILS}}</pre>
+                <div class="cta"><a class="btn" href="https://github.com/{{REPO}}/actions/runs/{{RUN_ID}}" target="_blank" rel="noopener">Open workflow run</a></div>
+                <p class="footer">You are receiving this message because alerts are enabled in Doppel for this repository.</p>
+              </div>
+            </div>
+          </body></html>
+          HTML
 
-          # Injeta os valores no HTML
+          # Injeta os valores no HTML (usa delimitador | e escapa &, | e \)
+          esc() { printf '%s' "$1" | sed 's/[&|\\]/\\&/g'; }
           sed -i \
-            -e "s|{{NOW}}|$NOW|g" \
-            -e "s|{{REPO}}|$REPO|g" \
-            -e "s|{{RUN_ID}}|$RUN_ID|g" \
-            -e "s|{{SUMMARY}}|$(printf '%s' "${SUMMARY:-Possible reconnaissance detected}" | sed 's/[&/\]/\\&/g')|g" \
-            -e "s|{{DETAILS}}|$(printf '%s' "${DETAILS:-No additional details provided.}" | sed 's/[&/\]/\\&/g')|g" \
+            -e "s|{{NOW}}|$(esc "$NOW")|g" \
+            -e "s|{{REPO}}|$(esc "$REPO")|g" \
+            -e "s|{{RUN_ID}}|$(esc "$RUN_ID")|g" \
+            -e "s|{{SUMMARY}}|$(esc "${SUMMARY:-Possible reconnaissance detected}")|g" \
+            -e "s|{{DETAILS}}|$(esc "${DETAILS:-No additional details provided.}")|g" \
             html.html
 
       - name: Send email via Brevo
@@ -160,22 +144,45 @@ HTML
             echo "Missing FROM_EMAIL or TO_EMAIL (see config.yaml or repository_dispatch payload)."
             exit 1
           fi
-
+          
+      - name: Send email via Brevo
+        shell: bash
+        env:
+          BREVO_API_KEY: ${{ secrets.BREVO_API_KEY }}
+          FROM_EMAIL:    ${{ steps.cfg.outputs.from_email }}
+          FROM_NAME:     ${{ steps.cfg.outputs.from_name }}
+          TO_EMAIL:      ${{ steps.cfg.outputs.to_email }}
+        run: |
           # Monta payload.json com Python (escapes corretos)
           python3 - <<'PY'
-import json, os
-def read(p):
-  with open(p,'r',encoding='utf-8') as f: return f.read()
-payload = {
-  "sender": {"email": os.environ["FROM_EMAIL"], "name": os.environ.get("FROM_NAME","Doppel Alerts")},
-  "to":     [{"email": os.environ["TO_EMAIL"]}],
-  "subject": read("subject.txt"),
-  "textContent": read("text.txt"),
-  "htmlContent": read("html.html")
-}
-with open("payload.json","w",encoding="utf-8") as f:
-  json.dump(payload, f, ensure_ascii=False)
-PY
+          import json, os, sys
+
+          def read(path):
+              try:
+                  with open(path, 'r', encoding='utf-8') as f:
+                      return f.read()
+              except FileNotFoundError:
+                  return ""
+
+          payload = {
+              "sender": {
+                  "email": os.environ.get("FROM_EMAIL", ""),
+                  "name": os.environ.get("FROM_NAME", "Doppel Alerts"),
+              },
+              "to": [
+                  {"email": os.environ.get("TO_EMAIL", "")}
+              ],
+              "subject": read("subject.txt"),
+              "textContent": read("text.txt"),
+              "htmlContent": read("html.html"),
+          }
+
+          with open("payload.json", "w", encoding="utf-8") as f:
+              json.dump(payload, f, ensure_ascii=False, indent=2)
+          PY
+
+          echo "Firing email to $TO_EMAIL..."
+
 
           echo "Firing email to $TO_EMAIL..."
           set -o pipefail
