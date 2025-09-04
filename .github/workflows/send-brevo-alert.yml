@@ -28,200 +28,129 @@ jobs:
 
       - name: Read sender and receiver from config.yaml
         id: cfg
+        shell: bash
         run: |
-          # Verificar se o arquivo config.yaml existe
           if [ ! -f "config.yaml" ]; then
             echo "config.yaml not found!"
             exit 1
           fi
-          
+
           FROM_EMAIL=$(yq -r '.notifications.email.from_email // ""' config.yaml)
           FROM_NAME=$(yq -r '.notifications.email.from_name  // "Doppel Alerts"' config.yaml)
           TO_EMAIL=$(yq -r '.notifications.email.to          // ""' config.yaml)
           SUBJECT_PREFIX=$(yq -r '.notifications.email.subject_prefix // "[Doppel]"' config.yaml)
 
+          # repository_dispatch pode sobrepor destino/prefixo
           if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
-            PAYLOAD_TO='${{ github.event.client_payload.email }}'
-            PAYLOAD_SUBJECT='${{ github.event.client_payload.subject }}'
-            if [ -n "$PAYLOAD_TO" ] && [ "$PAYLOAD_TO" != "null" ]; then
-              TO_EMAIL="$PAYLOAD_TO"
+            if [ -n "${{ github.event.client_payload.email }}" ] && [ "${{ github.event.client_payload.email }}" != "null" ]; then
+              TO_EMAIL='${{ github.event.client_payload.email }}'
             fi
-            if [ -n "$PAYLOAD_SUBJECT" ] && [ "$PAYLOAD_SUBJECT" != "null" ]; then
-              SUBJECT_PREFIX="$PAYLOAD_SUBJECT"
+            if [ -n "${{ github.event.client_payload.subject }}" ] && [ "${{ github.event.client_payload.subject }}" != "null" ]; then
+              SUBJECT_PREFIX='${{ github.event.client_payload.subject }}'
             fi
           fi
 
-          echo "from_email=$FROM_EMAIL" >> $GITHUB_OUTPUT
-          echo "from_name=$FROM_NAME" >> $GITHUB_OUTPUT
-          echo "to_email=$TO_EMAIL" >> $GITHUB_OUTPUT
-          echo "subject_prefix=$SUBJECT_PREFIX" >> $GITHUB_OUTPUT
+          echo "from_email=$FROM_EMAIL"         >> "$GITHUB_OUTPUT"
+          echo "from_name=$FROM_NAME"          >> "$GITHUB_OUTPUT"
+          echo "to_email=$TO_EMAIL"            >> "$GITHUB_OUTPUT"
+          echo "subject_prefix=$SUBJECT_PREFIX">> "$GITHUB_OUTPUT"
 
-      - name: Assemble subject, text and HTML body
+      - name: Build subject and bodies (text + HTML)
         id: msg
+        shell: bash
         env:
-          REPO: ${{ github.repository }}
+          REPO:   ${{ github.repository }}
           RUN_ID: ${{ github.run_id }}
         run: |
-          SUMMARY="${{ github.event.inputs.summary }}"
-          DETAILS="${{ github.event.inputs.details }}"
-
+          # Inputs do gatilho
           if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
-            SUMMARY="${{ github.event.client_payload.summary }}"
-            DETAILS="${{ github.event.client_payload.details }}"
+            SUMMARY='${{ github.event.client_payload.summary }}'
+            DETAILS='${{ github.event.client_payload.details }}'
+          else
+            SUMMARY='${{ github.event.inputs.summary }}'
+            DETAILS='${{ github.event.inputs.details }}'
           fi
 
-          NOW=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          NOW="$(date -u +"%Y-%m-%d %H:%M:%S UTC")"
 
           SUBJECT="${{ steps.cfg.outputs.subject_prefix }} Possible Reconnaissance"
           if [ -n "$SUMMARY" ] && [ "$SUMMARY" != "null" ]; then
             SUBJECT="${{ steps.cfg.outputs.subject_prefix }} $SUMMARY"
           fi
 
-          # Plain text fallback
-          TEXT_BODY="Time: $NOW
+          # Escreve assunto/texto/HTML em arquivos (evita problemas de quoting nos outputs)
+          printf "%s" "$SUBJECT" > subject.txt
+
+          cat > text.txt <<TXT
+Time: $NOW
 Repository: ${REPO}
 Run: ${RUN_ID}
 Summary: ${SUMMARY:-Possible reconnaissance detected}
 Details: ${DETAILS:-N/A}
-"
+TXT
 
-          # Build HTML (attractive, responsive, dark-on-light, English)
-          HTML_BODY=$(cat <<'HTML'
-<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
-<html xmlns="http://www.w3.org/1999/xhtml">
-<head>
-  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Doppel Alert</title>
-  <style>
-    :root {
-      --bg: #0f172a;         /* slate-900 */
-      --panel: #111827;      /* gray-900 */
-      --ink: #e5e7eb;        /* gray-200 */
-      --muted: #9ca3af;      /* gray-400 */
-      --accent: #f59e0b;     /* amber-500 */
-      --danger: #ef4444;     /* red-500 */
-      --ok: #22c55e;         /* green-500 */
-      --chip: #1f2937;       /* gray-800 */
-    }
-    body {
-      margin:0; padding:0; background:var(--bg); color:var(--ink);
-      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica Neue, Arial, "Apple Color Emoji", "Segoe UI Emoji";
-    }
-    .container {
-      max-width: 720px; margin: 0 auto; padding: 24px 16px;
-    }
-    .card {
-      background: linear-gradient(180deg, #0b1220 0%, #0a0f1a 100%);
-      border: 1px solid #1f2a44; border-radius: 14px; padding: 24px;
-      box-shadow: 0 10px 30px rgba(0,0,0,.45);
-    }
-    .badge {
-      display:inline-block; padding: 6px 10px; border-radius: 999px;
-      background: #2a1b1b; color: #fecaca; border:1px solid #7f1d1d; font-size:12px; letter-spacing:.2px;
-    }
-    h1 {
-      margin: 14px 0 6px; font-size: 22px; line-height: 1.3;
-    }
-    p { margin: 8px 0; color: var(--muted); }
-    .grid {
-      margin-top: 18px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
-    }
-    .k {
-      background: var(--chip); border: 1px solid #25314d; border-radius: 10px; padding: 10px 12px;
-    }
-    .k small { display:block; color: var(--muted); font-size: 12px; }
-    .k strong { color: var(--ink); font-size: 14px; }
-    pre {
-      margin-top: 16px; padding: 14px; background:#0b1220; border:1px solid #1f2a44; color:#d1d5db; border-radius: 10px;
-      overflow:auto; white-space:pre-wrap; word-break: break-word; font-size: 13px; line-height: 1.45;
-    }
-    .cta {
-      margin-top: 18px;
-    }
-    .btn {
-      display:inline-block; text-decoration:none; font-weight:600;
-      padding: 10px 14px; border-radius: 10px; border:1px solid #334155;
-      background: #0f1a33; color:#c7d2fe;
-    }
-    .footer {
-      margin-top: 18px; color: var(--muted); font-size: 12px; text-align:center;
-    }
-    @media (max-width:600px) {
-      .grid { grid-template-columns: 1fr; }
-    }
-  </style>
+          cat > html.html <<'HTML'
+<!doctype html>
+<html lang="en"><head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Doppel Alert</title>
+<style>
+  :root{--bg:#0f172a;--panel:#111827;--ink:#e5e7eb;--muted:#9ca3af;--danger:#ef4444;--chip:#1f2937}
+  body{margin:0;padding:0;background:var(--bg);color:var(--ink);font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,Helvetica Neue,Arial}
+  .container{max-width:720px;margin:0 auto;padding:24px 16px}
+  .card{background:linear-gradient(180deg,#0b1220 0%,#0a0f1a 100%);border:1px solid #1f2a44;border-radius:14px;padding:24px;box-shadow:0 10px 30px rgba(0,0,0,.45)}
+  .badge{display:inline-block;padding:6px 10px;border-radius:999px;background:#2a1b1b;color:#fecaca;border:1px solid #7f1d1d;font-size:12px;letter-spacing:.2px}
+  h1{margin:14px 0 6px;font-size:22px;line-height:1.3}
+  p{margin:8px 0;color:var(--muted)}
+  .grid{margin-top:18px;display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .k{background:var(--chip);border:1px solid #25314d;border-radius:10px;padding:10px 12px}
+  .k small{display:block;color:var(--muted);font-size:12px}
+  .k strong{color:var(--ink);font-size:14px}
+  pre{margin-top:16px;padding:14px;background:#0b1220;border:1px solid #1f2a44;color:#d1d5db;border-radius:10px;white-space:pre-wrap;word-break:break-word;font-size:13px;line-height:1.45}
+  .cta{margin-top:18px}.btn{display:inline-block;text-decoration:none;font-weight:600;padding:10px 14px;border-radius:10px;border:1px solid #334155;background:#0f1a33;color:#c7d2fe}
+  .footer{margin-top:18px;color:var(--muted);font-size:12px;text-align:center}
+  @media (max-width:600px){.grid{grid-template-columns:1fr}}
+</style>
 </head>
 <body>
   <div class="container">
     <div class="card">
       <span class="badge">Possible Reconnaissance</span>
       <h1>Suspicious DNS activity observed</h1>
-      <p>Our Doppel sensor detected one or more DNS queries that may indicate reconnaissance activity. Please review the context below and take any necessary action (block/contain/investigate).</p>
-
+      <p>Our Doppel sensor detected one or more DNS queries that may indicate reconnaissance activity. Please review the context below and take appropriate action (block/contain/investigate).</p>
       <div class="grid">
-        <div class="k">
-          <small>Timestamp (UTC)</small>
-          <strong>{{NOW}}</strong>
-        </div>
-        <div class="k">
-          <small>Repository</small>
-          <strong>{{REPO}}</strong>
-        </div>
-        <div class="k">
-          <small>Workflow Run</small>
-          <strong>#{{RUN_ID}}</strong>
-        </div>
-        <div class="k">
-          <small>Severity</small>
-          <strong style="color: var(--danger)">High (Recon)</strong>
-        </div>
+        <div class="k"><small>Timestamp (UTC)</small><strong>{{NOW}}</strong></div>
+        <div class="k"><small>Repository</small><strong>{{REPO}}</strong></div>
+        <div class="k"><small>Workflow Run</small><strong>#{{RUN_ID}}</strong></div>
+        <div class="k"><small>Severity</small><strong style="color: var(--danger)">High (Recon)</strong></div>
       </div>
-
       <div class="k" style="margin-top:14px">
-        <small>Summary</small>
-        <strong>{{SUMMARY}}</strong>
+        <small>Summary</small><strong>{{SUMMARY}}</strong>
       </div>
-
       <pre><strong>Details</strong>\n{{DETAILS}}</pre>
-
-      <div class="cta">
-        <a class="btn" href="https://github.com/{{REPO}}/actions/runs/{{RUN_ID}}" target="_blank" rel="noopener">Open workflow run</a>
-      </div>
-
-      <p class="footer">
-        You are receiving this message because alerts are enabled in Doppel for this repository.
-        If you did not expect this email, please rotate your API keys and review access settings.
-      </p>
+      <div class="cta"><a class="btn" href="https://github.com/{{REPO}}/actions/runs/{{RUN_ID}}" target="_blank" rel="noopener">Open workflow run</a></div>
+      <p class="footer">You are receiving this message because alerts are enabled in Doppel for this repository.</p>
     </div>
   </div>
-</body>
-</html>
+</body></html>
 HTML
-          )
 
-          # Inject runtime data into the HTML template
-          HTML_BODY="${HTML_BODY//\{\{NOW\}\}/$NOW}"
-          HTML_BODY="${HTML_BODY//\{\{REPO\}\}/${REPO}}"
-          HTML_BODY="${HTML_BODY//\{\{RUN_ID\}\}/${RUN_ID}}"
-          HTML_BODY="${HTML_BODY//\{\{SUMMARY\}\}/$(printf '%s' "${SUMMARY:-Possible reconnaissance detected}" | sed 's/[&]/\\&/g')}"
-          HTML_BODY="${HTML_BODY//\{\{DETAILS\}\}/$(printf '%s' "${DETAILS:-No additional details provided.}" | sed 's/[&]/\\&/g')}"
-
-          # Export outputs (JSON-escape text and HTML)
-          SUBJECT_JSON=$(python3 -c "import json; print(json.dumps('$SUBJECT'))")
-          TEXT_JSON=$(python3 -c "import json; print(json.dumps('''$TEXT_BODY'''))")
-          HTML_JSON=$(python3 -c "import json; print(json.dumps('''$HTML_BODY'''))")
-
-          echo "subject=$SUBJECT_JSON" >> $GITHUB_OUTPUT
-          echo "text=$TEXT_JSON" >> $GITHUB_OUTPUT
-          echo "html=$HTML_JSON" >> $GITHUB_OUTPUT
+          # Injeta os valores no HTML
+          sed -i \
+            -e "s|{{NOW}}|$NOW|g" \
+            -e "s|{{REPO}}|$REPO|g" \
+            -e "s|{{RUN_ID}}|$RUN_ID|g" \
+            -e "s|{{SUMMARY}}|$(printf '%s' "${SUMMARY:-Possible reconnaissance detected}" | sed 's/[&/\]/\\&/g')|g" \
+            -e "s|{{DETAILS}}|$(printf '%s' "${DETAILS:-No additional details provided.}" | sed 's/[&/\]/\\&/g')|g" \
+            html.html
 
       - name: Send email via Brevo
+        shell: bash
         env:
           BREVO_API_KEY: ${{ secrets.BREVO_API_KEY }}
-          FROM_EMAIL: ${{ steps.cfg.outputs.from_email }}
-          FROM_NAME: ${{ steps.cfg.outputs.from_name }}
-          TO_EMAIL: ${{ steps.cfg.outputs.to_email }}
+          FROM_EMAIL:    ${{ steps.cfg.outputs.from_email }}
+          FROM_NAME:     ${{ steps.cfg.outputs.from_name }}
+          TO_EMAIL:      ${{ steps.cfg.outputs.to_email }}
         run: |
           if [ -z "$BREVO_API_KEY" ]; then
             echo "BREVO_API_KEY not defined in Secrets!"
@@ -232,40 +161,45 @@ HTML
             exit 1
           fi
 
-          # Compose final JSON payload
-          cat > payload.json <<EOF
-{
-  "sender": {
-    "email": "$FROM_EMAIL",
-    "name": "$FROM_NAME"
-  },
-  "to": [
-    {
-      "email": "$TO_EMAIL"
-    }
-  ],
-  "subject": $(echo '${{ steps.msg.outputs.subject }}'),
-  "textContent": $(echo '${{ steps.msg.outputs.text }}'),
-  "htmlContent": $(echo '${{ steps.msg.outputs.html }}')
+          # Monta payload.json com Python (escapes corretos)
+          python3 - <<'PY'
+import json, os
+def read(p):
+  with open(p,'r',encoding='utf-8') as f: return f.read()
+payload = {
+  "sender": {"email": os.environ["FROM_EMAIL"], "name": os.environ.get("FROM_NAME","Doppel Alerts")},
+  "to":     [{"email": os.environ["TO_EMAIL"]}],
+  "subject": read("subject.txt"),
+  "textContent": read("text.txt"),
+  "htmlContent": read("html.html")
 }
-EOF
+with open("payload.json","w",encoding="utf-8") as f:
+  json.dump(payload, f, ensure_ascii=False)
+PY
 
           echo "Firing email to $TO_EMAIL..."
-          echo "Payload:"
-          cat payload.json
-          
-          curl -sS -X POST "https://api.brevo.com/v3/smtp/email" \
+          set -o pipefail
+          HTTP_CODE=$(curl -sS -X POST "https://api.brevo.com/v3/smtp/email" \
             -H "accept: application/json" \
             -H "api-key: $BREVO_API_KEY" \
             -H "content-type: application/json" \
             --data @payload.json \
-            -o resp.json -w "\nHTTP %{http_code}\n"
-
-          echo "Brevo's response:"
+            -o resp.json -w "%{http_code}")
+          CURL_RC=$?
+          echo "HTTP $HTTP_CODE"
+          echo "Response:"
           cat resp.json || true
-          
-          # Check if the request was successful
-          if [ $? -ne 0 ] || grep -q '"code":' resp.json && ! grep -q '"messageId":' resp.json; then
-            echo "Failed to send email!"
+
+          if [ $CURL_RC -ne 0 ]; then
+            echo "curl failed with code $CURL_RC"
             exit 1
           fi
+
+          # Sucesso do Brevo costuma retornar messageId
+          if ! grep -q '"messageId"' resp.json; then
+            echo "Brevo did not return messageId; treating as failure."
+            exit 1
+          fi
+
+          echo "Email sent successfully."
+
