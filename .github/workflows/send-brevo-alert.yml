@@ -86,7 +86,7 @@ Details: ${DETAILS:-N/A}
 "
 
           # Build HTML (attractive, responsive, dark-on-light, English)
-          HTML_BODY="$(cat <<'HTML'
+          HTML_BODY=$(cat <<'HTML'
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
 <html xmlns="http://www.w3.org/1999/xhtml">
 <head>
@@ -198,7 +198,7 @@ Details: ${DETAILS:-N/A}
 </body>
 </html>
 HTML
-          )"
+          )
 
           # Inject runtime data into the HTML template
           HTML_BODY="${HTML_BODY//\{\{NOW\}\}/$NOW}"
