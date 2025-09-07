@@ -1,5 +1,8 @@
 name: Send Doppel Alert Email
 
+permissions:
+  contents: read
+
 on:
   workflow_dispatch:
     inputs:
@@ -10,14 +13,15 @@ on:
       details:
         description: "Optional technical details"
         required: false
+      user_email:
+        description: "Recipient email"
+        required: false
   repository_dispatch:
     types: [doppel_alert]
 
 jobs:
   send-email:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -41,9 +45,14 @@ jobs:
           TO_EMAIL=$(yq -r '.notifications.email.to          // ""' config.yaml)
           SUBJECT_PREFIX=$(yq -r '.notifications.email.subject_prefix // "[Doppel]"' config.yaml)
 
-          # repository_dispatch pode sobrepor destino/prefixo
+          if [ -n "${{ github.event.inputs.user_email }}" ] && [ "${{ github.event.inputs.user_email }}" != "null" ]; then
+            TO_EMAIL='${{ github.event.inputs.user_email }}'
+          fi
+          
           if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
-            if [ -n "${{ github.event.client_payload.email }}" ] && [ "${{ github.event.client_payload.email }}" != "null" ]; then
+            if [ -n "${{ github.event.client_payload.user_email }}" ] && [ "${{ github.event.client_payload.user_email }}" != "null" ]; then
+              TO_EMAIL='${{ github.event.client_payload.user_email }}'
+            elif [ -n "${{ github.event.client_payload.email }}" ] && [ "${{ github.event.client_payload.email }}" != "null" ]; then
               TO_EMAIL='${{ github.event.client_payload.email }}'
             fi
             if [ -n "${{ github.event.client_payload.subject }}" ] && [ "${{ github.event.client_payload.subject }}" != "null" ]; then
@@ -51,10 +60,10 @@ jobs:
             fi
           fi
 
-          echo "from_email=$FROM_EMAIL"         >> "$GITHUB_OUTPUT"
-          echo "from_name=$FROM_NAME"          >> "$GITHUB_OUTPUT"
-          echo "to_email=$TO_EMAIL"            >> "$GITHUB_OUTPUT"
-          echo "subject_prefix=$SUBJECT_PREFIX">> "$GITHUB_OUTPUT"
+          echo "from_email=$FROM_EMAIL"          >> "$GITHUB_OUTPUT"
+          echo "from_name=$FROM_NAME"            >> "$GITHUB_OUTPUT"
+          echo "to_email=$TO_EMAIL"              >> "$GITHUB_OUTPUT"
+          echo "subject_prefix=$SUBJECT_PREFIX"  >> "$GITHUB_OUTPUT"
 
       - name: Build subject and bodies (text + HTML)
         id: msg
@@ -146,14 +155,6 @@ jobs:
             exit 1
           fi
           
-      - name: Send email via Brevo
-        shell: bash
-        env:
-          BREVO_API_KEY: ${{ secrets.BREVO_API_KEY }}
-          FROM_EMAIL:    ${{ steps.cfg.outputs.from_email }}
-          FROM_NAME:     ${{ steps.cfg.outputs.from_name }}
-          TO_EMAIL:      ${{ steps.cfg.outputs.to_email }}
-        run: |
           # Monta payload.json com Python (escapes corretos)
           python3 - <<'PY'
           import json, os, sys
