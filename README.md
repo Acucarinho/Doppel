@@ -7,7 +7,7 @@
 [![GitHub release](https://img.shields.io/badge/release-v0.3.0-blue)]()
 [![License](https://img.shields.io/badge/license-MIT-green)]()
 
-**Doppel** is a Red Team oriented DNS telemetry tool that helps operators detect when Blue Teams, IDS, or IPS systems are performing reverse lookups or other DNS-based reconnaissance on attacker-controlled infrastructure. It centralizes multiple DNS log sources, performs pattern-based detection, and provides reputation enrichment and alerting.
+**Doppel** is a Red Team oriented DNS telemetry tool that helps operators detect when Blue Teams, IDS, or IPS systems are performing reverse lookups or other DNS-based reconnaissance on attacker-controlled infrastructure. It centralizes multiple DNS log sources, performs pattern-based detection, and provides reputation enrichment and alerting. When suspicious activity is detected, Doppel automatically triggers an **email notification** to the configured recipient, ensuring operators are immediately informed of reconnaissance attempts in real time.
 
 ---
 
@@ -16,10 +16,18 @@
 - ✅ **Real-time DNS monitoring**  
 - ✅ **Advanced threat detection with VirusTotal integration**  
 - ✅ **Advanced reverse lookup detection with multiple patterns**  
-- ✅ **IP address extraction and validation**  
-- ✅ **Comprehensive tracking of detected IPs**  
+- ✅ **Fake DoH/HTTP server to feed misinformation to IDS/IPS**  
 - ✅ **Batch IP reputation checking**  
 - ✅ **Support for AWS Route53**
+
+## ✅ Tested with Leading Security Tools
+
+Doppel has been successfully tested in lab environments with several popular IDS/IPS and network security monitoring platforms to validate its detection and evasion capabilities:
+
+- 🛡️ **Strelka**
+- 🛡️ **Suricata** 
+- 🛡️ **Snort** 
+- 🛡️ **Zeek** 
 
 ---
 
@@ -146,23 +154,88 @@ docker ps
 
 ## Usage
 
-If you configured the VirusTotal API or Route53:
+If you configured the email use:
 
 ```bash
 ./doppel --config config.yaml
 ```
 
-For Bind9 logs only:
+If you are running Bind9 without docker use
 
 ```bash
 ./doppel --bind9
 ```
 
+To enable the fake server and provide false information use
+
+```bash
+./doppel --config.yaml --doh
+```
+
 For debug mode:
 
 ```bash
-./doppel --debug
+./doppel --config.yaml --debug
 ```
+
+## Email Alert System in Doppel
+
+```mermaid
+flowchart LR
+  %% ========= NODES =========
+  subgraph LOCAL["🖥️ Local / On-Prem"]
+    DOPPEL["Doppel\n(Detector DNS)"]
+    CFG["config.yaml\n(user_email, subject_prefix, etc.)"]
+  end
+
+  subgraph GH["🐙 GitHub"]
+    DISPATCH["repository_dispatch\n(event_type: doppel_alert)"]
+    WF["GitHub Actions Workflow\n(send-brevo-alert.yml)"]
+    SECRETS["Secrets:\nBREVO_API_KEY"]
+  end
+
+  subgraph BACKEND["☁️ Backend"]
+    LAMBDA["AWS Lambda\n(Endpoint)"]
+    SM["AWS Secrets Manager\n(GITHUB_TOKEN + API Keys)"]
+  end
+
+  subgraph ESP["📨 Email"]
+    BREVO["Brevo API\n/v3/smtp/email"]
+  end
+
+  subgraph USER["📬 Recipient"]
+    INBOX["User Mailbox"]
+  end
+
+  %% ========= FLOWS =========
+  DOPPEL --> CFG
+
+  %% Caminho A: Direto
+  CFG --> DISPATCH
+  DISPATCH --> WF
+  WF --> SECRETS
+  WF --> BREVO
+  BREVO --> INBOX
+
+  %% Caminho B: Com backend intermediário
+  CFG --> LAMBDA
+  LAMBDA --> SM
+  LAMBDA --> DISPATCH
+
+  %% ========= STYLES =========
+  classDef box fill:#0b1220,stroke:#1f2a44,color:#e5e7eb,stroke-width:1px;
+  classDef accent fill:#10213d,stroke:#2f3f67,color:#e5e7eb,stroke-width:1px;
+  classDef endpoint fill:#0f1a33,stroke:#334155,color:#c7d2fe,stroke-width:1px;
+  classDef group fill:#111827,stroke:#334155,color:#e5e7eb,stroke-width:1px;
+
+  class LOCAL,GH,BACKEND,ESP,USER group
+  class DOPPEL,CFG,WF,SECRETS,DISPATCH,LAMBDA,SM,BREVO,INBOX box
+  class BREVO,INBOX endpoint
+  class WF accent
+  class LAMBDA accent
+  class DISPATCH accent
+```
+
 
 ## Notes
 
@@ -174,8 +247,20 @@ Cloudflare is often praised for its security, DDoS protection, and performance f
 
 Cloudflare has a feature called Logpush, but guess what: they only offer it on their Enterprise plan. This means you have to pay a premium fee just to access the logs. But you can easily set up Bind9 on your own VPS to log DNS queries, completely free.
 
+## Why Go?
+
+I chose Go because I am actively learning the language.
+
+## Inspiration from the Nmap Book
+
+The concept for Doppel was directly inspired by Fyodor’s book Nmap Network Scanning.
+
+“One probe commonly initiated by IDSs is reverse DNS query of the attacker’s IP address. A domain name in an alert is more valuable than just an IP address, after all. Unfortunately, attackers who control their own rDNS (quite common) can watch the logs in real time and learn that they have been detected. This is a good time for attackers to feed misinformation, such as bogus names and cache entries to the requesting IDS.”
+
+> *“One probe commonly initiated by IDSs is reverse DNS query of the attacker’s IP address. A domain name in an alert is more valuable than just an IP address, after all. Unfortunately, attackers who control their own rDNS (quite common) can watch the logs in real time and learn that they have been detected. This is a good time for attackers to feed misinformation, such as bogus names and cache entries to the requesting IDS.”*
+
 ## To-Do List
 
 - [ ] Fast-Flux for IP and domain rotation
-- [ ] Providing false information to the IDS
-- [ ] Fake DoH/HTTP server for IDSs that use DoH
+- [x] Providing false information to the IDS
+- [x] Fake DoH/HTTP server for IDSs that use DoH
