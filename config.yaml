@@ -4,12 +4,10 @@
 # ================================
 
 api_keys:
-  virustotal: "cebf11b47954aeb2eb4bf03064a14064ebb7678da58815b2d2bef19b38d3d483"
   aws_access_key: "your-aws-access-key"
   aws_secret_key: "your-aws-secret-key"
 
 endpoints:
-  virustotal: "https://www.virustotal.com/api/v3/"
   aws_endpoint: "https://route53.amazonaws.com/"
 
 monitoring:
@@ -39,5 +37,5 @@ notifications:
   email:
     from_email: "alerts.doppel@gmail.com"  
     from_name:  "Doppel Alerts"             
-    to:         "luseple738@gmail.com"     
+    to:         "your_email@example.com"     
     subject_prefix: "[Doppel]"

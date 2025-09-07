@@ -5,186 +5,187 @@ import (
 	"net"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 )
 
-// DNSLogProcessor handles detection and analysis of DNS reverse lookups
 type DNSLogProcessor struct {
-	DetectionCount  int
-	LastDetection   time.Time
-	DebugMode       bool
-	AlertThreshold  int
-	detectedIPs     map[string]time.Time
+	// Estatísticas
+	DetectionCount   int
+	LastDetection    time.Time
+	DebugMode        bool
+	AlertThreshold   int
+
+	// Estado
+	detectedIPs      map[string]time.Time
 	recentDetections []string
-	patterns        []*regexp.Regexp
+
+	// Contador por ciclo (para alertar no próximo ciclo)
+	cycleDetections int
+
+	// Regex pré-compilados
+	// Exemplos de linhas do BIND:
+	//   "... query: darkinfrac2.local IN A +E(0)K (172.18.0.2)"
+	//   "... query: darkinfrac2.local A +E(0)K (172.18.0.2)"
+	anyQueryWithIN *regexp.Regexp
+	anyQueryNoIN   *regexp.Regexp
+	clientIPRE     *regexp.Regexp
+
+	// Mutex para proteger tudo que é mutável e acessado por goroutines
+	mu sync.Mutex
 }
 
-// NewDNSLogProcessor creates a new DNS log processor with optimized pattern matching
+// Para compatibilidade com quem quiser enviar uma única linha como “consulta”
+type DNSQuery struct {
+	Timestamp time.Time `json:"timestamp"`
+	ClientIP  string    `json:"client_ip"`
+	QueryType string    `json:"query_type"`
+	Domain    string    `json:"domain"`
+	RawLog    string    `json:"raw_log"`
+}
+
+func (p *DNSLogProcessor) ProcessQuery(q DNSQuery) { p.ProcessLogs([]string{q.RawLog}) }
+
 func NewDNSLogProcessor(debug bool, threshold int) *DNSLogProcessor {
-	processor := &DNSLogProcessor{
-		DebugMode:      debug,
-		AlertThreshold: threshold,
-		detectedIPs:    make(map[string]time.Time),
-		recentDetections: make([]string, 0),
+	return &DNSLogProcessor{
+		DebugMode:        debug,
+		AlertThreshold:   threshold,
+		detectedIPs:      make(map[string]time.Time),
+		recentDetections: make([]string, 0, 128),
+		anyQueryWithIN:   regexp.MustCompile(`(?i)\bquery:\s+([^\s]+)\s+IN\s+(A|AAAA|PTR)\b`),
+		anyQueryNoIN:     regexp.MustCompile(`(?i)\bquery:\s+([^\s]+)\s+(A|AAAA|PTR)\b`),
+		clientIPRE:       regexp.MustCompile(`(?i)\bclient\b(?:\s+@[^\s]+)?\s+(\d+\.\d+\.\d+\.\d+)#\d+`),
 	}
-	
-	// Pre-compile regex patterns for better performance
-	processor.patterns = []*regexp.Regexp{
-		regexp.MustCompile(`(?i)PTR`),
-		regexp.MustCompile(`(?i)in-addr\.arpa`),
-		regexp.MustCompile(`(?i)reverse.*lookup`),
-		regexp.MustCompile(`(?i)dns.*reverse`),
-		regexp.MustCompile(`\d+\.\d+\.\d+\.\d+\.in-addr\.arpa`),
-		regexp.MustCompile(`(?i)query.*type.*ptr`),
-	}
-	
-	return processor
 }
 
-// ProcessLogs analyzes DNS log entries for reverse lookup patterns
+// Processa um lote de linhas de log (chamado pelas goroutines do Docker)
 func (p *DNSLogProcessor) ProcessLogs(logs []string) {
-	currentDetections := 0
-	
+	found := 0
 	for _, entry := range logs {
-		if p.IsReverseLookup(entry) {
-			currentDetections++
-			ip := p.ExtractIPFromLog(entry)
-			p.HandleDetection(entry, ip)
-		} else if p.DebugMode {
-			fmt.Println("[DEBUG] Normal log entry:", sanitizeEntry(entry))
+		qname, qtype, clientIP := p.parse(entry)
+		if qtype == "" {
+			if p.DebugMode {
+				fmt.Println("[DEBUG] Normal log entry:", sanitizeEntry(entry))
+			}
+			continue
 		}
+		if clientIP == "" {
+			clientIP = p.extractIPFromLog(entry)
+		}
+		if clientIP == "" {
+			clientIP = "unknown"
+		}
+
+		found++
+		p.handleDetection(entry, clientIP, qtype, qname)
 	}
-	
-	if currentDetections > 0 && p.DebugMode {
-		fmt.Printf("[DEBUG] Processed %d logs, found %d reverse lookups\n", 
-			len(logs), currentDetections)
+
+	if found > 0 && p.DebugMode {
+		fmt.Printf("[DEBUG] Processed %d logs, detected %d DNS queries (A/AAAA/PTR)\n", len(logs), found)
 	}
 }
 
-// IsReverseLookup checks if a log entry contains reverse DNS lookup patterns
-func (p *DNSLogProcessor) IsReverseLookup(entry string) bool {
-	normalized := strings.ToLower(strings.TrimSpace(entry))
-	
-	// Check against pre-compiled regex patterns
-	for _, pattern := range p.patterns {
-		if pattern.MatchString(normalized) {
-			return true
-		}
+// Extrai qname, qtype e client IP tolerando variações
+func (p *DNSLogProcessor) parse(s string) (qname, qtype, clientIP string) {
+	line := strings.TrimSpace(s)
+
+	if m := p.anyQueryWithIN.FindStringSubmatch(line); len(m) == 3 {
+		qname, qtype = m[1], strings.ToUpper(m[2])
+	} else if m := p.anyQueryNoIN.FindStringSubmatch(line); len(m) == 3 {
+		qname, qtype = m[1], strings.ToUpper(m[2])
 	}
-	
-	return false
+
+	if m := p.clientIPRE.FindStringSubmatch(line); len(m) == 2 {
+		clientIP = m[1]
+	}
+	return
 }
 
-// ExtractIPFromLog extracts IP addresses from log entries
-func (p *DNSLogProcessor) ExtractIPFromLog(entry string) string {
-	// Multiple IP extraction strategies
+func (p *DNSLogProcessor) extractIPFromLog(entry string) string {
 	ipPatterns := []*regexp.Regexp{
-		regexp.MustCompile(`from\s+(\d+\.\d+\.\d+\.\d+)`),
-		regexp.MustCompile(`client[_-]ip[=:]\s*(\d+\.\d+\.\d+\.\d+)`),
-		regexp.MustCompile(`src[=:]\s*(\d+\.\d+\.\d+\.\d+)`),
+		regexp.MustCompile(`\bfrom\s+(\d+\.\d+\.\d+\.\d+)\b`),
+		regexp.MustCompile(`\bclient[_-]?ip[=:]\s*(\d+\.\d+\.\d+\.\d+)\b`),
+		regexp.MustCompile(`\bsrc[=:]\s*(\d+\.\d+\.\d+\.\d+)\b`),
 		regexp.MustCompile(`(\d+\.\d+\.\d+\.\d+).*in-addr\.arpa`),
 	}
-	
-	for _, pattern := range ipPatterns {
-		matches := pattern.FindStringSubmatch(entry)
-		if len(matches) > 1 {
-			ip := matches[1]
-			if isValidIP(ip) {
-				return ip
-			}
+	for _, r := range ipPatterns {
+		if m := r.FindStringSubmatch(entry); len(m) > 1 && isValidIP(m[1]) {
+			return m[1]
 		}
 	}
-	
-	// Fallback: simple space-separated extraction
-	parts := strings.Fields(entry)
-	for _, part := range parts {
+	for _, part := range strings.Fields(entry) {
 		if isValidIP(part) {
 			return part
 		}
 	}
-	
-	return "unknown"
+	return ""
 }
 
-// HandleDetection processes a detected reverse lookup event
-func (p *DNSLogProcessor) HandleDetection(entry string, ip string) {
+// Único caminho de detecção: atualiza estado sob mutex e imprime
+func (p *DNSLogProcessor) handleDetection(entry, clientIP, qtype, qname string) {
+	p.mu.Lock()
 	p.DetectionCount++
+	p.cycleDetections++
 	p.LastDetection = time.Now()
-	
-	// Track detected IPs with timestamp
-	if ip != "unknown" {
-		p.detectedIPs[ip] = p.LastDetection
-		p.recentDetections = append(p.recentDetections, ip)
-		
-		// Keep only recent detections (last 100)
-		if len(p.recentDetections) > 100 {
+
+	if clientIP != "" && clientIP != "unknown" {
+		p.detectedIPs[clientIP] = p.LastDetection
+		p.recentDetections = append(p.recentDetections, clientIP)
+		if len(p.recentDetections) > 200 {
 			p.recentDetections = p.recentDetections[1:]
 		}
 	}
-	
-	p.RecordDetection(entry, ip)
-	
+	p.mu.Unlock()
+
+	p.recordDetection(entry, clientIP, qtype, qname)
+
 	if p.DebugMode {
-		p.PrintDiscreetAlert(entry, ip)
+		p.printDiscreetAlert(entry, clientIP, qtype, qname)
 	}
-	
-	// Check if we need to escalate the alert
-	if p.DetectionCount >= p.AlertThreshold {
-		p.EscalateAlert(entry)
+
+	// Alerta imediato (limiar global)
+	p.mu.Lock()
+	needEscalate := p.DetectionCount >= p.AlertThreshold
+	p.mu.Unlock()
+	if needEscalate {
+		p.escalateAlert()
 	}
 }
 
-// RecordDetection logs detection information
-func (p *DNSLogProcessor) RecordDetection(entry string, ip string) {
-	timestamp := time.Now().Format("2006-01-02 15:04:05")
-	
-	var ipInfo string
-	if ip != "unknown" {
-		ipInfo = fmt.Sprintf("from %s", ip)
+func (p *DNSLogProcessor) recordDetection(entry, clientIP, qtype, qname string) {
+	ts := time.Now().Format("2006-01-02 15:04:05")
+	ipInfo := ""
+	if clientIP != "" && clientIP != "unknown" {
+		ipInfo = " from " + clientIP
 	}
-	
-	logMsg := fmt.Sprintf("[MONITOR] %s - Reverse lookup detected %s (%d total)", 
-		timestamp, ipInfo, p.DetectionCount)
-	
-	fmt.Println(logMsg)
-	
+	fmt.Printf("[MONITOR] %s - DNS query detected: %s %s%s\n", ts, qtype, qname, ipInfo)
+
 	if p.DebugMode {
 		fmt.Printf("[DETAIL] Entry: %s\n", sanitizeEntry(entry))
 	}
 }
 
-// PrintDiscreetAlert shows a subtle alert for detected reverse lookups
-func (p *DNSLogProcessor) PrintDiscreetAlert(entry string, ip string) {
-	cyan := "\033[36m"
-	reset := "\033[0m"
-	
-	var ipInfo string
-	if ip != "unknown" {
-		ipInfo = fmt.Sprintf(" (IP: %s)", ip)
+func (p *DNSLogProcessor) printDiscreetAlert(entry, clientIP, qtype, qname string) {
+	cyan, reset := "\033[36m", "\033[0m"
+	ipInfo := ""
+	if clientIP != "" && clientIP != "unknown" {
+		ipInfo = " (IP: " + clientIP + ")"
 	}
-	
-	fmt.Printf("%s[INFO] DNS monitoring activity detected%s: %s%s\n", 
-		cyan, reset, sanitizeEntry(entry), ipInfo)
+	fmt.Printf("%s[INFO] DNS activity%s: %s %s%s%s\n", cyan, reset, qtype, qname, ipInfo, reset)
 }
 
-// EscalateAlert triggers a higher-level alert when threshold is reached
-func (p *DNSLogProcessor) EscalateAlert(entry string) {
-	yellow := "\033[33m"
-	reset := "\033[0m"
-	
-	fmt.Printf("%s[ALERT] Multiple reverse lookups detected! (%d events)%s\n", 
-		yellow, p.DetectionCount, reset)
-	fmt.Printf("%s[ACTION] Consider changing infrastructure or investigating source%s\n", 
-		yellow, reset)
-	
-	// Additional escalation actions could be added here:
-	// - Send email alert
-	// - Trigger webhook
-	// - Log to external system
+// Alerta quando o limiar global é atingido
+func (p *DNSLogProcessor) escalateAlert() {
+	yellow, reset := "\033[33m", "\033[0m"
+	fmt.Printf("%s[ALERT] Multiple DNS queries detected! (%d events)%s\n", yellow, p.DetectionCount, reset)
+	fmt.Printf("%s[ACTION] Investigate potential reconnaissance or misconfiguration%s\n", yellow, reset)
 }
 
-// GetStats returns current detection statistics
+// ——— APIs consultadas pelo main ———
+
 func (p *DNSLogProcessor) GetStats() map[string]interface{} {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	return map[string]interface{}{
 		"total_detections":  p.DetectionCount,
 		"last_detection":    p.LastDetection,
@@ -195,8 +196,9 @@ func (p *DNSLogProcessor) GetStats() map[string]interface{} {
 	}
 }
 
-// GetDetectedIPs returns all unique detected IP addresses
 func (p *DNSLogProcessor) GetDetectedIPs() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	ips := make([]string, 0, len(p.detectedIPs))
 	for ip := range p.detectedIPs {
 		ips = append(ips, ip)
@@ -204,82 +206,75 @@ func (p *DNSLogProcessor) GetDetectedIPs() []string {
 	return ips
 }
 
-// GetRecentDetectedIPs returns IPs from recent detections
 func (p *DNSLogProcessor) GetRecentDetectedIPs() []string {
-	// Return copy to prevent external modification
-	recent := make([]string, len(p.recentDetections))
-	copy(recent, p.recentDetections)
-	return recent
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := make([]string, len(p.recentDetections))
+	copy(out, p.recentDetections)
+	return out
 }
 
-// GetIPDetectionTime returns when a specific IP was first detected
 func (p *DNSLogProcessor) GetIPDetectionTime(ip string) (time.Time, bool) {
-	detectionTime, exists := p.detectedIPs[ip]
-	return detectionTime, exists
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	t, ok := p.detectedIPs[ip]
+	return t, ok
 }
 
-// ResetStats clears all detection statistics
 func (p *DNSLogProcessor) ResetStats() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.DetectionCount = 0
 	p.LastDetection = time.Time{}
 	p.detectedIPs = make(map[string]time.Time)
-	p.recentDetections = make([]string, 0)
-	
+	p.recentDetections = make([]string, 0, 128)
+	p.cycleDetections = 0
 	fmt.Println("[INFO] Detection statistics reset")
 }
 
-// GetDetectionSummary returns a formatted summary of detections
-func (p *DNSLogProcessor) GetDetectionSummary() string {
-	if p.DetectionCount == 0 {
-		return "No reverse lookups detected"
-	}
-	
-	return fmt.Sprintf("Detected %d reverse lookups from %d unique IPs. Last detection: %v",
-		p.DetectionCount, len(p.detectedIPs), p.LastDetection.Format(time.RFC1123))
+// Chamado pelo main no FIM de cada ciclo para saber se deve imprimir
+// o CRITICAL no próximo ciclo.
+func (p *DNSLogProcessor) GetAndResetCycleDetections() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	c := p.cycleDetections
+	p.cycleDetections = 0
+	return c
 }
 
-// sanitizeEntry removes sensitive information from log entries
+// ——— util ———
+
 func sanitizeEntry(entry string) string {
-	// Remove potential sensitive data
+	entry = strings.TrimSpace(entry)
+	if entry == "" {
+		return ""
+	}
 	entry = regexp.MustCompile(`(?i)api[_-]?key[=:][^ ]+`).ReplaceAllString(entry, "api_key=***")
 	entry = regexp.MustCompile(`(?i)auth[=:][^ ]+`).ReplaceAllString(entry, "auth=***")
 	entry = regexp.MustCompile(`(?i)token[=:][^ ]+`).ReplaceAllString(entry, "token=***")
-	
-	// Partial IP obfuscation
-	parts := strings.Fields(entry)
-	for i, part := range parts {
-		if isValidIP(part) {
-			// Obfuscate first two octets
-			octets := strings.Split(part, ".")
-			if len(octets) == 4 {
-				parts[i] = fmt.Sprintf("xxx.xxx.%s.%s", octets[2], octets[3])
-			}
-		}
-	}
-	return strings.Join(parts, " ")
+	return entry
 }
 
-// isValidIP checks if a string is a valid IPv4 address
 func isValidIP(ip string) bool {
-	parsedIP := net.ParseIP(ip)
-	return parsedIP != nil && parsedIP.To4() != nil
+	ipn := net.ParseIP(ip)
+	return ipn != nil && ipn.To4() != nil
 }
 
-// IsHighFrequencyDetection checks if detections are happening rapidly
-func (p *DNSLogProcessor) IsHighFrequencyDetection(timeWindow time.Duration, threshold int) bool {
+// Alta frequência (heurstica simples por janela)
+func (p *DNSLogProcessor) IsHighFrequencyDetection(win time.Duration, threshold int) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
 	if p.DetectionCount < threshold {
 		return false
 	}
-	
-	// Check if we've had more than 'threshold' detections in the time window
-	cutoff := time.Now().Add(-timeWindow)
-	count := 0
-	
-	for _, detectionTime := range p.detectedIPs {
-		if detectionTime.After(cutoff) {
-			count++
+	cutoff := time.Now().Add(-win)
+	cnt := 0
+	for _, t := range p.detectedIPs {
+		if t.After(cutoff) {
+			cnt++
 		}
 	}
-	
-	return count >= threshold
+	return cnt >= threshold
 }
+

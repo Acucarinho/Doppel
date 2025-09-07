@@ -3,25 +3,24 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
 
+// =====================
+// Modelos de Config
+// =====================
+
 // Config structure matching config.yaml
 type Config struct {
 	APIKeys struct {
-		Cloudflare   string `yaml:"cloudflare"`
-		VirusTotal   string `yaml:"virustotal"`
-		AWSAccessKey string `yaml:"aws_access_key"`  // Added for Route53
-		AWSSecretKey string `yaml:"aws_secret_key"`  // Added for Route53
-		DigitalOcean string `yaml:"digitalocean"`    // Added for DigitalOcean
+		AWSAccessKey string `yaml:"aws_access_key"`
+		AWSSecretKey string `yaml:"aws_secret_key"`
 	} `yaml:"api_keys"`
 
 	Endpoints struct {
-		Cloudflare   string `yaml:"cloudflare"`
-		VirusTotal   string `yaml:"virustotal"`
-		AWSEndpoint  string `yaml:"aws_endpoint"`    // Added for AWS
-		DOEndpoint   string `yaml:"digitalocean_endpoint"` // Added for DigitalOcean
+		AWSEndpoint string `yaml:"aws_endpoint"`
 	} `yaml:"endpoints"`
 
 	Monitoring struct {
@@ -31,164 +30,185 @@ type Config struct {
 		AlertThreshold  int `yaml:"alert_threshold"`
 	} `yaml:"monitoring"`
 
-	Cloudflare struct {
-		APIKey string   `yaml:"api_key"`
-		Zones  []string `yaml:"zones"`
-	} `yaml:"cloudflare"`
-
 	AWS struct {
 		Region       string   `yaml:"region"`
-		Route53Zones []string `yaml:"route53_zones"` // Added for Route53
-	} `yaml:"aws"` // Added for AWS configuration
-
-	DigitalOcean struct {
-		Domains []string `yaml:"domains"` // Added for DigitalOcean
-	} `yaml:"digitalocean"` // Added for DigitalOcean configuration
+		Route53Zones []string `yaml:"route53_zones"`
+	} `yaml:"aws"`
 
 	Logging struct {
 		Level  string `yaml:"level"`
 		Output string `yaml:"output"`
 	} `yaml:"logging"`
+
+	// Docker (leitura de logs de container)
+	Docker struct {
+		Enabled     bool     `yaml:"enabled"`        // habilita captura via docker
+		Container   string   `yaml:"container"`      // nome/ID do container
+		ReadStdLogs bool     `yaml:"read_stdlogs"`   // acompanhar stdout/stderr (docker logs -f)
+		TailFiles   bool     `yaml:"tail_files"`     // tail -F dentro do container
+		Files       []string `yaml:"files"`          // lista de paths dentro do container
+	} `yaml:"docker"`
+
+	// Notificações (Email)
+	Notifications Notifications `yaml:"notifications"`
 }
+
+// Notifications agrega todos os canais
+type Notifications struct {
+	Email    EmailConfig    `yaml:"email"`
+}
+
+type EmailConfig struct {
+	FromEmail     string `yaml:"from_email"`      
+	FromName      string `yaml:"from_name"`       
+	To            string `yaml:"to"`             
+	SubjectPrefix string `yaml:"subject_prefix"`  
+}
+
+// =====================
+// Carregamento
+// =====================
 
 // LoadConfig reads the YAML configuration from the given path
 func LoadConfig(path string) (*Config, error) {
-	// Open the file
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open config file: %v", err)
 	}
 	defer file.Close()
 
-	// Decode YAML
 	cfg := &Config{}
 	decoder := yaml.NewDecoder(file)
 	if err := decoder.Decode(cfg); err != nil {
 		return nil, fmt.Errorf("failed to decode config YAML: %v", err)
 	}
 
-	// Set default values if not specified
+	// -------- Defaults --------
+	// Monitoring
 	if cfg.Monitoring.IntervalSeconds == 0 {
-		cfg.Monitoring.IntervalSeconds = 60 // Default to 60 seconds
+		cfg.Monitoring.IntervalSeconds = 60
 	}
-
 	if cfg.Monitoring.TimeoutSeconds == 0 {
-		cfg.Monitoring.TimeoutSeconds = 30 // Default to 30 seconds
+		cfg.Monitoring.TimeoutSeconds = 30
 	}
-
 	if cfg.Monitoring.AlertThreshold == 0 {
-		cfg.Monitoring.AlertThreshold = 5 // Default to 5 detections
+		cfg.Monitoring.AlertThreshold = 5
 	}
 
-	if cfg.Endpoints.Cloudflare == "" {
-		cfg.Endpoints.Cloudflare = "https://api.cloudflare.com/client/v4/" // Default Cloudflare endpoint
+	// Endpoints
+	if strings.TrimSpace(cfg.Endpoints.AWSEndpoint) == "" {
+		cfg.Endpoints.AWSEndpoint = "https://route53.amazonaws.com/"
 	}
 
-	if cfg.Endpoints.VirusTotal == "" {
-		cfg.Endpoints.VirusTotal = "https://www.virustotal.com/api/v3/" // Default VirusTotal endpoint
+	// AWS
+	if strings.TrimSpace(cfg.AWS.Region) == "" {
+		cfg.AWS.Region = "us-east-1"
 	}
 
-	if cfg.Endpoints.AWSEndpoint == "" {
-		cfg.Endpoints.AWSEndpoint = "https://route53.amazonaws.com/" // Default AWS endpoint
+	// Docker
+	if cfg.Docker.Enabled {
+		if !cfg.Docker.ReadStdLogs && !cfg.Docker.TailFiles {
+			// se habilitado e nenhum modo escolhido, padrão: stdout/stderr
+			cfg.Docker.ReadStdLogs = true
+		}
+		if len(cfg.Docker.Files) > 0 {
+			// normaliza caminhos (trim de espaços)
+			out := make([]string, 0, len(cfg.Docker.Files))
+			for _, f := range cfg.Docker.Files {
+				if s := strings.TrimSpace(f); s != "" {
+					out = append(out, s)
+				}
+			}
+			cfg.Docker.Files = out
+		}
 	}
 
-	if cfg.Endpoints.DOEndpoint == "" {
-		cfg.Endpoints.DOEndpoint = "https://api.digitalocean.com/v2/" // Default DigitalOcean endpoint
+	// Notifications defaults (não obrigatórios)
+	if strings.TrimSpace(cfg.Notifications.Email.FromName) == "" {
+		cfg.Notifications.Email.FromName = "Doppel Alerts"
 	}
-
-	if cfg.AWS.Region == "" {
-		cfg.AWS.Region = "us-east-1" // Default AWS region
+	if strings.TrimSpace(cfg.Notifications.Email.SubjectPrefix) == "" {
+		cfg.Notifications.Email.SubjectPrefix = "[Doppel]"
 	}
 
 	return cfg, nil
 }
 
+// =====================
+// Validações
+// =====================
+
 // ValidateConfig validates the configuration for required fields
 func (c *Config) ValidateConfig() error {
-	// Check if at least one provider is configured
-	hasCloudflare := c.APIKeys.Cloudflare != "" && len(c.Cloudflare.Zones) > 0
+	// --- Providers (AWS) ---
 	hasAWS := c.APIKeys.AWSAccessKey != "" && c.APIKeys.AWSSecretKey != "" && len(c.AWS.Route53Zones) > 0
-	hasDigitalOcean := c.APIKeys.DigitalOcean != "" && len(c.DigitalOcean.Domains) > 0
 
-	if !hasCloudflare && !hasAWS && !hasDigitalOcean {
-		return fmt.Errorf("no DNS providers configured. Please configure at least one provider")
-	}
-
-	// Validate Cloudflare configuration if enabled
-	if hasCloudflare {
-		if c.APIKeys.Cloudflare == "" {
-			return fmt.Errorf("Cloudflare API key is required when Cloudflare zones are configured")
-		}
-		for i, zone := range c.Cloudflare.Zones {
-			if zone == "" {
-				return fmt.Errorf("Cloudflare zone #%d cannot be empty", i+1)
-			}
-		}
-	}
-
-	// Validate AWS configuration if enabled
 	if hasAWS {
-		if c.APIKeys.AWSAccessKey == "" {
+		if strings.TrimSpace(c.APIKeys.AWSAccessKey) == "" {
 			return fmt.Errorf("AWS access key is required when AWS Route53 zones are configured")
 		}
-		if c.APIKeys.AWSSecretKey == "" {
+		if strings.TrimSpace(c.APIKeys.AWSSecretKey) == "" {
 			return fmt.Errorf("AWS secret key is required when AWS Route53 zones are configured")
 		}
-		if c.AWS.Region == "" {
+		if strings.TrimSpace(c.AWS.Region) == "" {
 			return fmt.Errorf("AWS region is required when AWS is configured")
 		}
 		for i, zone := range c.AWS.Route53Zones {
-			if zone == "" {
+			if strings.TrimSpace(zone) == "" {
 				return fmt.Errorf("AWS Route53 zone #%d cannot be empty", i+1)
 			}
 		}
 	}
 
-	// Validate DigitalOcean configuration if enabled
-	if hasDigitalOcean {
-		if c.APIKeys.DigitalOcean == "" {
-			return fmt.Errorf("DigitalOcean API key is required when DigitalOcean domains are configured")
-		}
-		for i, domain := range c.DigitalOcean.Domains {
-			if domain == "" {
-				return fmt.Errorf("DigitalOcean domain #%d cannot be empty", i+1)
-			}
-		}
-	}
-
-	// Validate monitoring settings
+	// --- Monitoring ---
 	if c.Monitoring.IntervalSeconds < 30 {
 		return fmt.Errorf("monitoring interval must be at least 30 seconds")
 	}
-
 	if c.Monitoring.TimeoutSeconds < 10 {
 		return fmt.Errorf("timeout must be at least 10 seconds")
 	}
-
 	if c.Monitoring.AlertThreshold < 1 {
 		return fmt.Errorf("alert threshold must be at least 1")
 	}
 
+	// --- Docker ---
+	if c.Docker.Enabled {
+		if strings.TrimSpace(c.Docker.Container) == "" {
+			return fmt.Errorf("docker.container is required when docker.enabled is true")
+		}
+		if !c.Docker.ReadStdLogs && !c.Docker.TailFiles {
+			return fmt.Errorf("docker: enable at least one of read_stdlogs or tail_files")
+		}
+		if c.Docker.TailFiles && len(c.Docker.Files) == 0 {
+			return fmt.Errorf("docker: tail_files is true but no docker.files provided")
+		}
+	}
+
+	// --- Notifications ---
+	// Não tornamos obrigatório ter um canal; apenas um aviso (deixe como comentário ou log no main).
+	// Se quiser forçar e-mail, descomente abaixo:
+	/*
+		if strings.TrimSpace(c.Notifications.Email.FromEmail) == "" ||
+			strings.TrimSpace(c.Notifications.Email.To) == "" {
+			return fmt.Errorf("notifications.email.from_email and notifications.email.to are required for email alerts")
+		}
+	*/
+
 	return nil
 }
+
+// =====================
+// Helpers de Provedores
+// =====================
 
 // GetProviderZones returns the zones/domains for a specific provider
 func (c *Config) GetProviderZones(providerName string) []string {
 	switch providerName {
-	case "Cloudflare":
-		return c.Cloudflare.Zones
 	case "AWS Route53":
 		return c.AWS.Route53Zones
-	case "DigitalOcean":
-		return c.DigitalOcean.Domains
 	default:
 		return []string{}
 	}
-}
-
-// HasCloudflare returns true if Cloudflare is configured
-func (c *Config) HasCloudflare() bool {
-	return c.APIKeys.Cloudflare != "" && len(c.Cloudflare.Zones) > 0
 }
 
 // HasAWS returns true if AWS Route53 is configured
@@ -196,46 +216,68 @@ func (c *Config) HasAWS() bool {
 	return c.APIKeys.AWSAccessKey != "" && c.APIKeys.AWSSecretKey != "" && len(c.AWS.Route53Zones) > 0
 }
 
-// HasDigitalOcean returns true if DigitalOcean is configured
-func (c *Config) HasDigitalOcean() bool {
-	return c.APIKeys.DigitalOcean != "" && len(c.DigitalOcean.Domains) > 0
-}
-
 // GetEnabledProviders returns a list of enabled DNS providers
 func (c *Config) GetEnabledProviders() []string {
 	providers := []string{}
-
-	if c.HasCloudflare() {
-		providers = append(providers, "Cloudflare")
-	}
-
 	if c.HasAWS() {
 		providers = append(providers, "AWS Route53")
 	}
-
-	if c.HasDigitalOcean() {
-		providers = append(providers, "DigitalOcean")
-	}
-
 	return providers
 }
 
 // GetProviderCount returns the number of configured DNS providers
 func (c *Config) GetProviderCount() int {
 	count := 0
-
-	if c.HasCloudflare() {
-		count++
-	}
-
 	if c.HasAWS() {
 		count++
 	}
-
-	if c.HasDigitalOcean() {
-		count++
-	}
-
 	return count
+}
+
+// =====================
+// Helpers Docker
+// =====================
+
+func (c *Config) HasDocker() bool {
+	return c.Docker.Enabled && strings.TrimSpace(c.Docker.Container) != ""
+}
+func (c *Config) DockerContainer() string {
+	return c.Docker.Container
+}
+func (c *Config) DockerFiles() []string {
+	return append([]string(nil), c.Docker.Files...)
+}
+func (c *Config) DockerReadStdLogs() bool {
+	return c.Docker.ReadStdLogs
+}
+func (c *Config) DockerTailFiles() bool {
+	return c.Docker.TailFiles
+}
+
+// =====================
+// Helpers Notifications
+// =====================
+
+func (c *Config) HasEmailNotifications() bool {
+	return strings.TrimSpace(c.Notifications.Email.FromEmail) != "" &&
+		strings.TrimSpace(c.Notifications.Email.To) != ""
+}
+func (c *Config) EmailFrom() string {
+	return strings.TrimSpace(c.Notifications.Email.FromEmail)
+}
+func (c *Config) EmailFromName() string {
+	if s := strings.TrimSpace(c.Notifications.Email.FromName); s != "" {
+		return s
+	}
+	return "Doppel Alerts"
+}
+func (c *Config) EmailTo() string {
+	return strings.TrimSpace(c.Notifications.Email.To)
+}
+func (c *Config) EmailSubjectPrefix() string {
+	if s := strings.TrimSpace(c.Notifications.Email.SubjectPrefix); s != "" {
+		return s
+	}
+	return "[Doppel]"
 }
 
