@@ -23,7 +23,6 @@
 
 Doppel has been successfully tested in lab environments with several popular IDS/IPS and network security monitoring platforms to validate its detection and evasion capabilities:
 
-- 🛡️ **Strelka**
 - 🛡️ **Suricata** 
 - 🛡️ **Snort** 
 - 🛡️ **Zeek** 
@@ -179,7 +178,7 @@ If you are running Bind9 without docker use
 To enable the fake server and provide false information use
 
 ```bash
-./doppel --config.yaml --doh
+./doppel --config config.yaml --debug --doh
 ```
 
 For debug mode:
