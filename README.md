@@ -13,8 +13,7 @@
 
 ## Features
 
-- ✅ **Real-time DNS monitoring**  
-- ✅ **Advanced threat detection with VirusTotal integration**  
+- ✅ **Real-time DNS monitoring**   
 - ✅ **Advanced reverse lookup detection with multiple patterns**  
 - ✅ **Fake DoH/HTTP server to feed misinformation to IDS/IPS**  
 - ✅ **Batch IP reputation checking**  
@@ -154,6 +153,17 @@ docker ps
 
 ## Usage
 
+Edit your `config.yaml` and set your own email address in the `notifications` section:
+
+```yaml
+notifications:
+  email:
+    from_email: "alerts.doppel@gmail.com"   # Sender address (configured in Brevo)
+    from_name:  "Doppel Alerts"             # Friendly sender name
+    to:         "your_email@example.com"    # <--- Replace this with your email
+    subject_prefix: "[Doppel]"              # Subject prefix for all alerts
+```
+
 If you configured the email use:
 
 ```bash
@@ -179,6 +189,8 @@ For debug mode:
 ```
 
 ## Email Alert System in Doppel
+
+The Doppel email alert system leverages a secure serverless architecture where detected reconnaissance events trigger an AWS Lambda function via API Gateway, which validates API keys against AWS Secrets Manager and dispatches a repository_dispatch event to the GitHub Actions workflow; this workflow then utilizes Brevo's transactional email API with pre-approved templates to deliver immediate security notifications to registered users while maintaining complete isolation of sensitive credentials through GitHub Secrets and AWS IAM roles, ensuring no exposure of API keys or tokens throughout the entire execution chain.
 
 ```mermaid
 flowchart LR
@@ -260,6 +272,7 @@ The concept for Doppel was directly inspired by Fyodor’s book Nmap Network Sca
 
 ## To-Do List
 
+- [ ] Advanced threat detection with VirusTotal integration
 - [ ] Fast-Flux for IP and domain rotation
 - [x] Providing false information to the IDS
 - [x] Fake DoH/HTTP server for IDSs that use DoH
