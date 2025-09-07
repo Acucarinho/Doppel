@@ -243,9 +243,12 @@ flowchart LR
 
 ## Why Cloudflare Sucks
 
-Cloudflare is often praised for its security, DDoS protection, and performance features. But the reality is, many of the services they charge for are things that can be done for free with a little effort and the right tools.  
+## ⚠️ Why not Cloudflare Logs?
 
-Cloudflare has a feature called Logpush, but guess what: they only offer it on their Enterprise plan. This means you have to pay a premium fee just to access the logs. But you can easily set up Bind9 on your own VPS to log DNS queries, completely free.
+At first, I considered using the **Cloudflare API** to fetch DNS logs directly. But here’s the catch: to access raw DNS query logs you need **Logpush**, and that’s only available in their **Enterprise plan**. In other words, you need to pay a premium just to see your own logs.  
+
+Instead of being locked into a vendor paywall, you can achieve the same result for "free". Just deploy **Bind9** (or another DNS server) on your own VPS and configure logging. This gives you full visibility into DNS queries without spending extra money — and you stay in full control of your data.
+
 
 ## Why Go?
 
@@ -254,8 +257,6 @@ I chose Go because I am actively learning the language.
 ## Inspiration from the Nmap Book
 
 The concept for Doppel was directly inspired by Fyodor’s book Nmap Network Scanning.
-
-“One probe commonly initiated by IDSs is reverse DNS query of the attacker’s IP address. A domain name in an alert is more valuable than just an IP address, after all. Unfortunately, attackers who control their own rDNS (quite common) can watch the logs in real time and learn that they have been detected. This is a good time for attackers to feed misinformation, such as bogus names and cache entries to the requesting IDS.”
 
 > *“One probe commonly initiated by IDSs is reverse DNS query of the attacker’s IP address. A domain name in an alert is more valuable than just an IP address, after all. Unfortunately, attackers who control their own rDNS (quite common) can watch the logs in real time and learn that they have been detected. This is a good time for attackers to feed misinformation, such as bogus names and cache entries to the requesting IDS.”*
 
