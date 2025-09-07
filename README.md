@@ -241,9 +241,7 @@ flowchart LR
 
 - **Note:** For Route53 logs, you need to enable Resolver Query Logs and configure an S3 bucket or CloudWatch Logs.
 
-## Why Cloudflare Sucks
-
-## ⚠️ Why not Cloudflare Logs?
+## ⚠️ Why Cloudflare Sucks
 
 At first, I considered using the **Cloudflare API** to fetch DNS logs directly. But here’s the catch: to access raw DNS query logs you need **Logpush**, and that’s only available in their **Enterprise plan**. In other words, you need to pay a premium just to see your own logs.  
 
