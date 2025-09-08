@@ -184,7 +184,7 @@ To enable the fake server and provide false information use
 For debug mode:
 
 ```bash
-./doppel --config.yaml --debug
+./doppel --config config.yaml --debug
 ```
 
 ## Email Alert System in Doppel
