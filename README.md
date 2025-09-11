@@ -271,6 +271,7 @@ The concept for Doppel was directly inspired by Fyodor’s book Nmap Network Sca
 
 ## To-Do List
 
+- [ ] Discord and Telegram support
 - [ ] Advanced threat detection with VirusTotal integration
 - [ ] Fast-Flux for IP and domain rotation
 - [x] Providing false information to the IDS
